@@ -12,6 +12,10 @@
 
 #include "bpe.hpp"
 
+#ifdef __linux__
+#include <sys/resource.h>
+#endif
+
 using Clock = std::chrono::steady_clock;
 static double ms_since(Clock::time_point t0)
 {
