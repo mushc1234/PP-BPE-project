@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <climits>
 #include <fstream>
+#include <queue>
 #include <sstream>
 #include <stdexcept>
 
@@ -348,6 +349,83 @@ void Tokenizer::encode_word(const char *data, size_t len, std::vector<int32_t> &
         ids.resize(w);
     }
     out.insert(out.end(), ids.begin(), ids.end());
+}
+
+// ---------------------------------------------------------------------------------------
+// BPE encoding of one word, O(n log n) version: linked list + min-heap
+// ---------------------------------------------------------------------------------------
+//
+// Instead of rescanning the whole word every round, keep every candidate pair in a min-heap
+// ordered by (rank, position). After a merge only the two pairs touching the new token change,
+// so only those two are looked up and pushed. Heap entries whose tokens have since changed are
+// stale and are simply skipped when popped (lazy deletion).
+//
+// Same output as encode_word: equal-rank pairs are merged left to right, and a token created by
+// merge k can only form pairs with rank > k, so processing by (rank, position) is equivalent.
+
+void Tokenizer::encode_word_heap(const char *data, size_t len, std::vector<int32_t> &out) const
+{
+    if (len == 0)
+        return;
+
+    // Doubly linked list over byte positions. id[i] = -1 marks a node that was merged away.
+    std::vector<int32_t> id(len), prev(len), next(len);
+    for (size_t i = 0; i < len; i++)
+    {
+        id[i] = byte_to_id_[(unsigned char)data[i]];
+        prev[i] = int32_t(i) - 1;
+        next[i] = i + 1 < len ? int32_t(i) + 1 : -1;
+    }
+
+    // A candidate merge of node `pos` with its right neighbour (whose tokens were left/right).
+    struct Cand
+    {
+        int32_t rank, pos, left, right, result;
+    };
+    auto later = [](const Cand &a, const Cand &b)
+    { return a.rank != b.rank ? a.rank > b.rank : a.pos > b.pos; };
+    std::priority_queue<Cand, std::vector<Cand>, decltype(later)> heap(later);
+
+    // Look up the pair (p, next[p]); push it if it is mergeable.
+    auto push_pair = [&](int32_t p)
+    {
+        int32_t q = next[p];
+        if (q < 0)
+            return;
+        auto it = merges_.find(pair_key(id[p], id[q]));
+        if (it != merges_.end())
+            heap.push({it->second.rank, p, id[p], id[q], it->second.result});
+    };
+
+    for (size_t i = 0; i + 1 < len; i++)
+        push_pair(int32_t(i));
+
+    while (!heap.empty())
+    {
+        Cand c = heap.top();
+        heap.pop();
+
+        // Skip stale entries: the tokens at this position are no longer the ones we looked up.
+        int32_t p = c.pos, q = next[p];
+        if (id[p] != c.left || q < 0 || id[q] != c.right)
+            continue;
+
+        // Merge: node p becomes the new token, node q is unlinked.
+        id[p] = c.result;
+        id[q] = -1;
+        next[p] = next[q];
+        if (next[q] >= 0)
+            prev[next[q]] = p;
+
+        // Only the pairs touching the new token changed.
+        if (prev[p] >= 0)
+            push_pair(prev[p]);
+        push_pair(p);
+    }
+
+    // Node 0 is never removed (only right-hand nodes are), so the list always starts there.
+    for (int32_t i = 0; i >= 0; i = next[i])
+        out.push_back(id[i]);
 }
 
 std::vector<int32_t> Tokenizer::encode(const std::string &text) const

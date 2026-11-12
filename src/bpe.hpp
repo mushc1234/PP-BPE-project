@@ -38,6 +38,9 @@ public:
     // BPE-encode one word (raw bytes) and append its token ids to `out`.
     void encode_word(const char *data, size_t len, std::vector<int32_t> &out) const;
 
+    // Same result as encode_word, but O(n log n): linked list + min-heap of candidate pairs.
+    void encode_word_heap(const char *data, size_t len, std::vector<int32_t> &out) const;
+
     // Convenience: pretokenize + encode every word. This is the sequential baseline.
     std::vector<int32_t> encode(const std::string &text) const;
 

@@ -1,6 +1,6 @@
 // Sequential BPE baseline.
 //
-// Usage: bpe_seq <input.txt> [-o ids.bin] [--vocab path] [--merges path]
+// Usage: bpe_seq <input.txt> [-o ids.bin] [--algo naive|heap] [--vocab path] [--merges path]
 //   Encodes the whole file, prints timing, and optionally writes the token ids as raw int32.
 #include <chrono>
 #include <cstdio>
@@ -20,7 +20,7 @@ static double ms_since(Clock::time_point t0)
 
 int main(int argc, char **argv)
 {
-    std::string input, out_path;
+    std::string input, out_path, algo = "naive"; // algo: "naive" = O(n^2), "heap" = O(n log n)
     std::string vocab = "data/gpt2/vocab.json", merges = "data/gpt2/merges.txt";
     for (int i = 1; i < argc; i++)
     {
@@ -30,12 +30,14 @@ int main(int argc, char **argv)
             vocab = argv[++i];
         else if (!strcmp(argv[i], "--merges") && i + 1 < argc)
             merges = argv[++i];
+        else if (!strcmp(argv[i], "--algo") && i + 1 < argc)
+            algo = argv[++i];
         else
             input = argv[i];
     }
-    if (input.empty())
+    if (input.empty() || (algo != "naive" && algo != "heap"))
     {
-        std::cerr << "usage: " << argv[0] << " <input.txt> [-o ids.bin] [--vocab p] [--merges p]\n";
+        std::cerr << "usage: " << argv[0] << " <input.txt> [-o ids.bin] [--algo naive|heap] [--vocab p] [--merges p]\n";
         return 1;
     }
 
@@ -59,11 +61,18 @@ int main(int argc, char **argv)
         t0 = Clock::now();
         std::vector<int32_t> ids;
         ids.reserve(text.size() / 3);
+        const bool use_heap = (algo == "heap");
         for (const Span &w : words)
-            tok.encode_word(text.data() + w.offset, w.length, ids);
+        {
+            if (use_heap)
+                tok.encode_word_heap(text.data() + w.offset, w.length, ids);
+            else
+                tok.encode_word(text.data() + w.offset, w.length, ids);
+        }
         double t_enc = ms_since(t0);
 
         double total = t_pre + t_enc;
+        std::printf("algorithm  : %s\n", algo.c_str());
         std::printf("bytes      : %zu\n", text.size());
         std::printf("words      : %zu\n", words.size());
         std::printf("tokens     : %zu\n", ids.size());
