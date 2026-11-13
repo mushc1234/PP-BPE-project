@@ -139,7 +139,20 @@ for L in 4 8 16 32 64 128 256 512 1024 2048 4096; do
 done
 ```
 
-在 server 上，要在每個 `bin/bpe_seq` 前面加上 `run -c 1 --`。本機結果：交叉點約在 L = 16 bytes。
+上面的迴圈只是單次量測，雜訊大。要得到可以放進報告的表格，用 `scripts/bench_long.sh`：它對每個長度、
+每種演算法各跑 `-n` 次（預設 10），輸出 encode 時間的中位數與 naive / heap 比值（測試檔不存在時會自動產生）：
+
+```
+bash scripts/bench_long.sh -n 10
+```
+
+在 server 上，要把整個腳本放進**同一個** `run` 工作（約需數十秒），所有數字才會來自同一個節點：
+
+```
+run -c 1 -- bash scripts/bench_long.sh -n 10
+```
+
+本機結果：交叉點約在 L = 16 bytes。
 
 ## 6. Profiling
 

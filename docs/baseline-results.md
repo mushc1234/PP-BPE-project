@@ -95,9 +95,35 @@ hyper-thread。解讀超過 6 個 thread 的 OpenMP scalability 時要記得這�
 `encode_word` 內部的 hash 查詢、掃描迴圈、merge 壓縮各占多少，**目前還不知道**（需要 `perf annotate`）。
 每個 word 配置記憶體的成本很小（約 4%，其中一部分來自載入階段）。
 
-## 3. 依 word 長度比較 naive 與 heap encoder（本機，單次量測，只計 encode 時間）
+## 3. 依 word 長度比較 naive 與 heap encoder
 
-檔案由 `scripts/gen_long_words.py` 產生：把真實英文字母切成等長的 word，每個檔案 256 KB。
+檔案由 `scripts/gen_long_words.py` 產生：把真實英文字母切成等長的 word，每個檔案 256 KB。只計 encode 時間。
+
+### server-compute（`-c 1`，`scripts/bench_long.sh -n 20`，每格為 20 次的中位數，同一個工作內量測）
+
+| L（bytes） | naive (ms) | heap (ms) | naive / heap |
+|---|---|---|---|
+| 4 | 14.64 | 24.09 | 0.61 |
+| 8 | 27.38 | 31.00 | 0.88 |
+| 16 | 45.97 | 34.59 | 1.33 |
+| 32 | 75.38 | 37.63 | 2.00 |
+| 64 | 117.34 | 38.86 | 3.02 |
+| 128 | 176.25 | 40.30 | 4.37 |
+| 256 | 262.73 | 41.79 | 6.29 |
+| 512 | 402.94 | 43.97 | 9.16 |
+| 1024 | 647.66 | 46.35 | 13.97 |
+| 2048 | 1092.37 | 49.01 | 22.29 |
+| 4096 | 1862.46 | 52.40 | 35.54 |
+
+交叉點在 **L ≈ 10 bytes**（L=8 時 naive 快 12%，L=16 時 heap 快 33%）。WikiText 的平均 word 約 5.2 bytes，落在
+naive 較快的一側，所以在真實文字上 heap 較慢（約 1.4 倍，見第 1 節）。Heap 的時間幾乎不隨 L 增加
+（L=4 到 4096 只增加 2.2 倍），naive 則增加 127 倍。
+
+naive 在 server 上對 L 的惡化比本機嚴重（L=4096：server 1,862 ms，本機 427 ms；heap 為 52 ms 對 39 ms）。
+推測是 naive 的迴圈大量隨機查 `unordered_map`，對記憶體延遲較敏感，而 server 是虛擬機、記憶體條件不同；
+這只是推測，尚未用計數器驗證。
+
+### 本機對照（單次量測；L=4 的 naive 偏高是雜訊，重複量測約為 8 ms）
 
 | L（bytes） | naive (ms) | heap (ms) | naive / heap |
 |---|---|---|---|
@@ -128,7 +154,7 @@ Heap 的時間幾乎不隨 L 改變（輸入大小固定時為 O(n log n)）；n
 ## 尚未量測
 
 - 第 2 節的 `perf` 結果仍是單次量測（`perf` 取樣本身不需要重複，但 `perf stat` 的數字可以重跑幾次確認）。
-- 第 3 節的 word 長度表是本機單次量測，要在 server-compute 上用 `bench.sh` 重做（server 上 heap 的相對劣勢較小，交叉點可能不同）。
-- naive 與 heap 放在同一個 `run` 工作內的對照量測。
+- 第 1 節 naive 與 heap 的比例是在不同的 `run` 工作中量的，可再放進同一個工作內確認。
+- 用硬體計數器驗證「naive 在 server 上對長 word 惡化較多是因為記憶體延遲」的推測。
 - train 的峰值記憶體（試試 `sacct -j <jobid> --format=MaxRSS`）。
 - `encode_word` 內部的時間分配（`perf annotate`）。
